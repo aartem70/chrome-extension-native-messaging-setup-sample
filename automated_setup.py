@@ -26,6 +26,7 @@ def run_as_admin():
 class AutomatedSetup:
     def __init__(self):
         self.APP_NAME = "com.your.speechrecognition"
+        self.gui = None  # Initialize gui attribute as None
         
         # Get the directory where the setup script is running
         if getattr(sys, 'frozen', False):
@@ -36,37 +37,84 @@ class AutomatedSetup:
         self.app_dir = self.setup_dir / "app"
         self.extension_dir = self.setup_dir / "extension"
         
-        # Get extension ID from the bundled extension
+        # Don't get extension ID in init
+        self.EXTENSION_ID = None
+        self.EXTENSION_URL = None
+
+    def initialize_extension(self):
+        """Initialize extension ID and URL after GUI is set up"""
         self.EXTENSION_ID = self.get_extension_id()
         self.EXTENSION_URL = f"https://chrome.google.com/webstore/detail/{self.EXTENSION_ID}"
 
     def get_extension_id(self):
-        """Extract extension ID from the bundled extension's manifest"""
+        """Get ID from installed Chrome extension using manifest key"""
         try:
-            # First try unpacked extension
+            # Read our manifest to get the key
             manifest_path = self.extension_dir / "manifest.json"
-            if manifest_path.exists():
-                with open(manifest_path) as f:
-                    manifest = json.load(f)
-                    if 'key' in manifest:
-                        # If extension is unpacked, calculate ID from key
-                        return self.calculate_extension_id(manifest['key'])
+            print(f"\nLooking for manifest at: {manifest_path}")
             
-            # Try packed extension (.crx file)
-            crx_path = self.extension_dir / "extension.crx"
-            if crx_path.exists():
-                with zipfile.ZipFile(crx_path) as zf:
-                    with zf.open('manifest.json') as f:
-                        manifest = json.load(f)
-                        if 'key' in manifest:
-                            return self.calculate_extension_id(manifest['key'])
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+                key = manifest.get('key')
+                if not key:
+                    raise Exception("Extension key not found in manifest.json")
+                print(f"Found key in manifest: {key[:32]}...")  # Print first part of key
+
+            # Calculate the expected extension ID
+            expected_id = self.calculate_extension_id(key)
+            print(f"\nCalculated extension ID: {expected_id}")
+
+            # Verify the extension exists in Chrome
+            if sys.platform.startswith('win'):
+                chrome_user_data = Path(os.environ['LOCALAPPDATA']) / "Google" / "Chrome" / "User Data"
+            else:
+                chrome_user_data = Path.home() / "Library" / "Application Support" / "Google" / "Chrome"
+
+            print(f"Searching for extension in: {chrome_user_data}")
+
+            if not chrome_user_data.exists():
+                raise Exception(f"Chrome user data directory not found at: {chrome_user_data}")
+
+            profiles = ['Default'] + [f'Profile {i}' for i in range(1, 10)]
             
-            raise Exception("Could not find extension manifest")
+            self.gui.update_status("Searching for extension in Chrome profiles...", 5)
             
+            for profile in profiles:
+                self.gui.detail_label["text"] = f"Checking profile: {profile}"
+                print(f"\nChecking profile: {profile}")
+                
+                pref_files = [
+                    chrome_user_data / profile / "Secure Preferences",
+                    chrome_user_data / profile / "Preferences"
+                ]
+                
+                for pref_file in pref_files:
+                    if pref_file.exists():
+                        try:
+                            with open(pref_file) as f:
+                                print(f"Reading: {pref_file}")
+                                prefs = json.load(f)
+                                
+                                extensions = prefs.get('extensions', {}).get('settings', {})
+                                print(f"Found {len(extensions)} extensions in {pref_file.name}")
+                                
+                                if expected_id in extensions:
+                                    print(f"\n✓ Found extension {expected_id} in profile: {profile}")
+                                    print(f"Extension details: {json.dumps(extensions[expected_id].get('manifest', {}), indent=2)}")
+                                    self.gui.detail_label["text"] = f"Found extension in {profile}"
+                                    return expected_id
+                                else:
+                                    print(f"Extension {expected_id} not found in this file")
+                                    
+                        except Exception as e:
+                            print(f"Error reading {pref_file}: {e}")
+                            continue
+
+            raise Exception("Extension not found. Please install the Chrome extension first.")
+
         except Exception as e:
             print(f"Error getting extension ID: {e}")
-            # Fallback to a default ID if needed
-            return "your_default_extension_id"
+            raise
 
     def calculate_extension_id(self, key):
         """Calculate extension ID from public key"""
@@ -113,14 +161,15 @@ class AutomatedSetup:
             else:
                 exe_name = "speech_recognition_app"
             
+            # Look for the executable in the bundled resources
             exe_source = self.get_resource_path(os.path.join("app", "dist", exe_name))
             
             if not os.path.exists(exe_source):
                 raise FileNotFoundError(f"Could not find executable at {exe_source}")
             
-            # Copy the executable to installation directory
-            shutil.copy2(exe_source, install_dir)
+            # Copy only the executable file to installation directory
             exe_dest = os.path.join(install_dir, exe_name)
+            shutil.copy2(exe_source, exe_dest)
             
             # Set executable permissions on macOS
             if sys.platform.startswith('darwin'):
@@ -234,11 +283,16 @@ class AutomatedSetup:
 
 class SetupGUI:
     def __init__(self):
+        print("Initializing GUI...")
         self.root = tk.Tk()
         self.root.title("Speech Recognition Setup")
-        self.root.geometry("400x250")
+        self.root.geometry("400x300")  # Made taller for more details
+        print("Creating AutomatedSetup instance...")
         self.setup = AutomatedSetup()
+        self.setup.gui = self  # Set GUI reference
+        print("Creating widgets...")
         self.create_widgets()
+        print("GUI initialization complete")
 
     def create_widgets(self):
         # Create and pack widgets
@@ -248,8 +302,9 @@ class SetupGUI:
         self.progress = ttk.Progressbar(self.root, length=300, mode='determinate')
         self.progress.pack(pady=20)
 
-        self.detail_label = ttk.Label(self.root, text="", padding=10)
-        self.detail_label.pack()
+        # Make detail label more prominent
+        self.detail_label = ttk.Label(self.root, text="", padding=10, wraplength=350)
+        self.detail_label.pack(fill='x', padx=10)
 
     def update_status(self, message, progress):
         self.status_label["text"] = message
@@ -257,10 +312,16 @@ class SetupGUI:
         self.root.update()
 
     def run_setup(self):
+        print("Starting setup process...")
         try:
+            # Initialize extension first
+            self.update_status("Looking for Chrome extension...", 5)
+            self.setup.initialize_extension()
+
             # Check Chrome
             self.update_status("Checking Chrome installation...", 10)
             if not self.setup.check_chrome_installed():
+                print("Chrome not installed")
                 messagebox.showerror("Error", "Google Chrome is not installed. Please install Chrome first.")
                 self.root.quit()
                 return
@@ -290,8 +351,10 @@ class SetupGUI:
             messagebox.showinfo("Success", "Installation completed successfully!\n\nPlease install the Chrome extension to complete the setup.")
             
         except Exception as e:
+            print(f"Setup error: {e}")
             messagebox.showerror("Error", f"Installation failed: {str(e)}")
         finally:
+            print("Setup process complete")
             self.root.quit()
 
     def start(self):
@@ -299,9 +362,16 @@ class SetupGUI:
         self.root.mainloop()
 
 def main():
-    run_as_admin()
-    gui = SetupGUI()
-    gui.start()
+    print("Starting setup...")
+    try:
+        gui = SetupGUI()
+        print("Created GUI instance")
+        gui.start()
+        print("Started GUI")
+    except Exception as e:
+        print(f"Error during setup: {e}")
+        input("Press Enter to exit...")
 
 if __name__ == "__main__":
+    print("Script started")
     main() 

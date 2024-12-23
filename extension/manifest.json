@@ -2,12 +2,17 @@
   "manifest_version": 3,
   "name": "Real-time Transcription",
   "version": "1.0",
-  "description": "Mock real-time transcription extension",
+  "description": "Real-time speech recognition transcription extension",
   "permissions": ["nativeMessaging"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_popup": "popup.html"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAhm0LjvYqHkYjHXfYqz9p1B5j9DHcLXZxwcYeU/pqBCERgqIZUDqv+Tg8Bvy9GwQgQFgNHUFp1l4gLjSPHWz0C4Up6zvyXxhCvGKXUYVrZL/2wQCh4h/AJE4qQXUhzEnWfpVLzHZqBP7vEXz/AmF1qXF0qDL/xWVJjk5oHqw1p2jMnW6PnthpEXUxlrqYs9zht6vWwBGE0tUXbxlvGhOzVKPFXhwQNnvnY+YPKFp7dZ74K7YXDuXyGUZBb5GCf6lbJsxJVHg7UxnPNDlHcX0G7hfhkRF5lsOY0F3Qnol6pQPgViwxNBF56l5rCEDnQEBLlYPyxMJvF/ghwyQS4Ql+6QIDAQAB",
+  "oauth2": {
+    "client_id": "real-time-transcription-ext-v1",
+    "scopes": []
   }
 } 
