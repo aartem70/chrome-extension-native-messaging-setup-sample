@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Real-time Transcription",
+  "version": "1.0",
+  "description": "Mock real-time transcription extension",
+  "permissions": ["nativeMessaging"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+} 
