@@ -58,7 +58,7 @@ class AutomatedSetup:
                 key = manifest.get('key')
                 if not key:
                     raise Exception("Extension key not found in manifest.json")
-                print(f"Found key in manifest: {key[:32]}...")  # Print first part of key
+                print(f"Found key in manifest: {key[:32]}...")
 
             # Calculate the expected extension ID
             expected_id = self.calculate_extension_id(key)
@@ -72,15 +72,9 @@ class AutomatedSetup:
 
             print(f"Searching for extension in: {chrome_user_data}")
 
-            if not chrome_user_data.exists():
-                raise Exception(f"Chrome user data directory not found at: {chrome_user_data}")
-
             profiles = ['Default'] + [f'Profile {i}' for i in range(1, 10)]
             
-            self.gui.update_status("Searching for extension in Chrome profiles...", 5)
-            
             for profile in profiles:
-                self.gui.detail_label["text"] = f"Checking profile: {profile}"
                 print(f"\nChecking profile: {profile}")
                 
                 pref_files = [
@@ -95,17 +89,16 @@ class AutomatedSetup:
                                 print(f"Reading: {pref_file}")
                                 prefs = json.load(f)
                                 
+                                # Simply check if the ID exists in extensions.settings
                                 extensions = prefs.get('extensions', {}).get('settings', {})
-                                print(f"Found {len(extensions)} extensions in {pref_file.name}")
+                                print(f"Found {len(extensions)} extensions")
+                                print(f"Available extension IDs: {list(extensions.keys())}")
                                 
                                 if expected_id in extensions:
                                     print(f"\n✓ Found extension {expected_id} in profile: {profile}")
-                                    print(f"Extension details: {json.dumps(extensions[expected_id].get('manifest', {}), indent=2)}")
                                     self.gui.detail_label["text"] = f"Found extension in {profile}"
                                     return expected_id
-                                else:
-                                    print(f"Extension {expected_id} not found in this file")
-                                    
+                                
                         except Exception as e:
                             print(f"Error reading {pref_file}: {e}")
                             continue
