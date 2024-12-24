@@ -85,20 +85,24 @@ class AutomatedSetup:
                 for pref_file in pref_files:
                     if pref_file.exists():
                         try:
-                            with open(pref_file) as f:
-                                print(f"Reading: {pref_file}")
-                                prefs = json.load(f)
-                                
-                                # Simply check if the ID exists in extensions.settings
-                                extensions = prefs.get('extensions', {}).get('settings', {})
-                                print(f"Found {len(extensions)} extensions")
-                                print(f"Available extension IDs: {list(extensions.keys())}")
-                                
-                                if expected_id in extensions:
-                                    print(f"\n✓ Found extension {expected_id} in profile: {profile}")
-                                    self.gui.detail_label["text"] = f"Found extension in {profile}"
-                                    return expected_id
-                                
+                            # Try different encodings
+                            for encoding in ['utf-8', 'utf-8-sig', 'latin1']:
+                                try:
+                                    with open(pref_file, encoding=encoding) as f:
+                                        print(f"Reading: {pref_file} with {encoding} encoding")
+                                        prefs = json.load(f)
+                                        
+                                        # Simply check if the ID exists in extensions.settings
+                                        extensions = prefs.get('extensions', {}).get('settings', {})
+                                        print(f"Found {len(extensions)} extensions")
+                                        print(f"Available extension IDs: {list(extensions.keys())}")
+                                        
+                                        if expected_id in extensions:
+                                            print(f"\n✓ Found extension {expected_id} in profile: {profile}")
+                                            self.gui.detail_label["text"] = f"Found extension in {profile}"
+                                            return expected_id
+                                except UnicodeDecodeError:
+                                    continue
                         except Exception as e:
                             print(f"Error reading {pref_file}: {e}")
                             continue
@@ -114,15 +118,21 @@ class AutomatedSetup:
         import base64
         import hashlib
         
+        print(f"\nCalculating extension ID from key:")
+        print(f"Input key: {key[:32]}...")
+        
         # Decode the key
         decoded_key = base64.b64decode(key)
+        print(f"Decoded key length: {len(decoded_key)} bytes")
         
         # Calculate SHA256 hash
         sha = hashlib.sha256(decoded_key).hexdigest()
+        print(f"SHA256 hash: {sha[:32]}...")
         
         # Convert to Chrome extension ID format (first 32 chars)
         extension_id = ''.join(chr(ord('a') + (int(x, 16) % 26)) if x.isdigit() 
                              else x.lower() for x in sha[:32])
+        print(f"Calculated extension ID: {extension_id}")
         
         return extension_id
 
@@ -136,7 +146,9 @@ class AutomatedSetup:
 
     def install_chrome_extension(self):
         """Open Chrome Web Store page for extension installation"""
-        print("Opening Chrome extension page...")
+        if not self.EXTENSION_URL:
+            raise Exception("Extension URL not set")
+        print(f"Opening Chrome extension URL: {self.EXTENSION_URL}")
         webbrowser.open(self.EXTENSION_URL)
         return True
 
@@ -279,69 +291,135 @@ class SetupGUI:
         print("Initializing GUI...")
         self.root = tk.Tk()
         self.root.title("Speech Recognition Setup")
-        self.root.geometry("400x300")  # Made taller for more details
+        self.root.geometry("400x400")  # Made taller for new controls
         print("Creating AutomatedSetup instance...")
         self.setup = AutomatedSetup()
-        self.setup.gui = self  # Set GUI reference
+        self.setup.gui = self
         print("Creating widgets...")
         self.create_widgets()
         print("GUI initialization complete")
 
     def create_widgets(self):
-        # Create and pack widgets
-        self.status_label = ttk.Label(self.root, text="Preparing installation...", padding=10)
+        # Extension ID Frame
+        ext_frame = ttk.LabelFrame(self.root, text="Chrome Extension ID", padding=10)
+        ext_frame.pack(fill='x', padx=10, pady=5)
+
+        # Extension ID Entry
+        self.ext_id_var = tk.StringVar()
+        self.ext_id_entry = ttk.Entry(ext_frame, textvariable=self.ext_id_var)
+        self.ext_id_entry.pack(fill='x', pady=5)
+
+        # Buttons Frame
+        btn_frame = ttk.Frame(ext_frame)
+        btn_frame.pack(fill='x', pady=5)
+
+        # Auto Detect Button
+        self.detect_btn = ttk.Button(btn_frame, text="Auto Detect", command=self.auto_detect_extension)
+        self.detect_btn.pack(side='left', padx=5)
+
+        # Continue Button
+        self.continue_btn = ttk.Button(btn_frame, text="Continue", command=self.validate_and_continue)
+        self.continue_btn.pack(side='right', padx=5)
+
+        # Status Labels
+        self.status_label = ttk.Label(self.root, text="Waiting for extension ID...", padding=10)
         self.status_label.pack()
 
         self.progress = ttk.Progressbar(self.root, length=300, mode='determinate')
         self.progress.pack(pady=20)
 
-        # Make detail label more prominent
         self.detail_label = ttk.Label(self.root, text="", padding=10, wraplength=350)
         self.detail_label.pack(fill='x', padx=10)
 
-    def update_status(self, message, progress):
-        self.status_label["text"] = message
-        self.progress["value"] = progress
-        self.root.update()
+    def auto_detect_extension(self):
+        """Try to auto-detect the extension ID"""
+        try:
+            self.status_label["text"] = "Detecting extension..."
+            self.detail_label["text"] = "Searching in Chrome profiles..."
+            self.progress["value"] = 10
+            self.root.update()
+
+            # Try to detect extension
+            extension_id = self.find_extension_id()
+            if extension_id:
+                self.ext_id_var.set(extension_id)
+                self.detail_label["text"] = f"Found extension: {extension_id}"
+                self.status_label["text"] = "Extension detected successfully!"
+            else:
+                self.detail_label["text"] = "Extension not found. Please enter ID manually."
+                self.status_label["text"] = "Auto-detection failed"
+        except Exception as e:
+            self.detail_label["text"] = f"Error: {str(e)}"
+            self.status_label["text"] = "Auto-detection failed"
+
+    def find_extension_id(self):
+        """Find extension ID in Chrome profiles"""
+        if sys.platform.startswith('win'):
+            chrome_user_data = Path(os.environ['LOCALAPPDATA']) / "Google" / "Chrome" / "User Data"
+        else:
+            chrome_user_data = Path.home() / "Library" / "Application Support" / "Google" / "Chrome"
+
+        profiles = ['Default'] + [f'Profile {i}' for i in range(1, 10)]
+        
+        for profile in profiles:
+            pref_file = chrome_user_data / profile / "Preferences"
+            
+            if pref_file.exists():
+                try:
+                    with open(pref_file, encoding='utf-8') as f:
+                        prefs = json.load(f)
+                        extensions = prefs.get('extensions', {}).get('settings', {})
+                        
+                        # Look for extension with matching name or other criteria
+                        for ext_id, ext_data in extensions.items():
+                            manifest = ext_data.get('manifest', {})
+                            if manifest.get('name') == "Real-time Transcription":
+                                return ext_id
+                except Exception as e:
+                    print(f"Error reading {pref_file}: {e}")
+                    continue
+        return None
+
+    def validate_and_continue(self):
+        """Validate extension ID and continue with setup"""
+        extension_id = self.ext_id_var.get().strip()
+        if not extension_id:
+            messagebox.showerror("Error", "Please enter or detect an extension ID")
+            return
+            
+        # Basic validation of extension ID format
+        if not extension_id.isalnum() or len(extension_id) != 32:
+            messagebox.showerror("Error", "Invalid extension ID format")
+            return
+
+        # Store the ID and set up the extension URL
+        self.setup.EXTENSION_ID = extension_id
+        self.setup.EXTENSION_URL = f"https://chrome.google.com/webstore/detail/{extension_id}"
+        self.run_setup()
 
     def run_setup(self):
+        """Run the setup process with the selected extension ID"""
         print("Starting setup process...")
         try:
-            # Initialize extension first
-            self.update_status("Looking for Chrome extension...", 5)
-            self.setup.initialize_extension()
-
-            # Check Chrome
-            self.update_status("Checking Chrome installation...", 10)
-            if not self.setup.check_chrome_installed():
-                print("Chrome not installed")
-                messagebox.showerror("Error", "Google Chrome is not installed. Please install Chrome first.")
-                self.root.quit()
-                return
-
-            # Install application
+            # Use the stored extension ID for the rest of the setup
             self.update_status("Installing application...", 30)
             install_dir = self.setup.install_application()
 
-            # Setup native messaging
             self.update_status("Configuring native messaging...", 50)
             manifest_path = self.setup.setup_native_messaging(install_dir)
 
-            # Create shortcuts
             self.update_status("Creating shortcuts...", 70)
             self.setup.create_shortcuts(install_dir)
 
-            # Verify installation
             self.update_status("Verifying installation...", 90)
             if not self.setup.verify_installation(install_dir, manifest_path):
                 raise Exception("Installation verification failed")
 
-            # Install Chrome extension
             self.update_status("Opening Chrome extension page...", 95)
             self.setup.install_chrome_extension()
 
             self.update_status("Installation completed successfully!", 100)
-            messagebox.showinfo("Success", "Installation completed successfully!\n\nPlease install the Chrome extension to complete the setup.")
+            messagebox.showinfo("Success", "Installation completed successfully!")
             
         except Exception as e:
             print(f"Setup error: {e}")
@@ -350,8 +428,12 @@ class SetupGUI:
             print("Setup process complete")
             self.root.quit()
 
+    def update_status(self, message, progress):
+        self.status_label["text"] = message
+        self.progress["value"] = progress
+        self.root.update()
+
     def start(self):
-        self.root.after(100, self.run_setup)
         self.root.mainloop()
 
 def main():
